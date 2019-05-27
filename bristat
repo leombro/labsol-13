@@ -1,0 +1,207 @@
+#!/bin/bash
+#
+# \author Orlando Leombruni
+#
+# Si dichiara che il contenuto di questo file è in ogni sua parte opera originale dell'autore.
+
+# Inizializzazione delle variabili usate
+val=""		
+uoption=false
+moption=false
+poption=false
+filelist=""
+userlist=""
+checkuser=false
+
+#Implementazione dell'hash compatibile con Bash < 4
+#Il comando eval valuta la riga e sostituisce le variabili con il loro contenuto, dopodiche' esegue la stringa cosi' formata
+#Cio' permette l'utilizzo di una sorta di "hash" compatibile anche con le vecchie versioni di Bash
+function getArray() {
+	array=$1
+	indice=$2
+	riga=$3
+	val=$(eval echo \$${array}_$indice)
+}
+
+# Funzione che valuta se l'utente esaminato è già presente nel dizionario (in caso contrario, lo aggiunge)
+function userSetup() {
+	__username=$1
+	getArray wins "$__username"
+	if [ "$val" = "" ] ; then
+		userlist="$userlist $__username"
+		eval wins_$__username=0
+		if $moption ; then
+			eval sum_$__username=0
+		fi
+	fi
+}
+
+# Funzione che aggiunge una vittoria all'utente passato come parametro (sconfitta nel caso sia specificata l'opzione -p)
+function hashVictory() {
+	__username=$1
+	getArray wins "$__username"
+	temp=$val
+	let "temp += 1"
+	eval wins_$__username=$temp
+}
+
+# Funzione che aggiunge i punti all'utente 
+function hashTotalPoints() {
+	__username=$1
+	__points=$2
+	getArray sum "$__username"
+	temp=$val
+	let "temp += $__points"
+	eval sum_$__username=$temp
+}
+
+# Funzione che sostituisce, per ogni utente, il totale dei punti con la media 
+function replacePointsWithAverage() {
+	for player in $userlist ; do
+		getArray sum "$player"
+		__points=$val
+		getArray wins "$player"
+		__games=$val
+		if (( __points == 0 )) || (( __games == 0 )) ; then
+			__points=0
+		else
+			let "__points = __points/__games"
+		fi
+		eval sum_$player=$__points
+	done
+}
+
+# Funzione che stampa il contenuto degli array
+function printUsers() {
+	for gplayer in $userlist ; do
+		 getArray wins "$gplayer"
+		__wins=$val
+		if $moption ; then
+			getArray sum "$gplayer"
+			__average=$val
+			echo "user $gplayer :: partite $resultstring: $__wins media punti: $__average" 
+		else
+			echo "user $gplayer :: partite $resultstring: $__wins"
+		fi
+	done
+	echo "Bye"
+}
+
+# Parsing degli argomenti
+for arg; do
+	if ! $uoption && $checkuser; then   # Se nell'iterazione precedente è stata specificata -u, controlla l'esistenza dell'utente fornito
+		if [ -f $arg ] ; then			# Se è un file, non è stato specificato un utente
+			echo "Errore: opzione -u inserita ma nessun utente specificato" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+		elif [[ "$arg" = "-"* ]] ; then	# Se è un'opzione, non è stato specificato un utente
+			echo "Errore: opzione -u inserita ma nessun utente specificato" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+		else 					# E' stato specificato un utente: lo inserisco nel dizionario
+			uoption=true
+			myuser=$arg
+			userSetup $myuser
+			continue 1
+		fi
+	fi
+	if [ -f $arg ] ; then			# Aggiungo l'argomento corrente alla lista file
+		filelist="$filelist $arg"
+	elif [ "$arg" = "-m" ] ; then	# Controllo se l'opzione -m è già stata inserita; in tal caso restituisce errore, altrimenti attiva il flag
+		if ! $moption ; then
+			moption=true
+		else
+			echo "Argomento non valido: opzione -m ripetuta" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+		fi
+	elif [ "$arg" = "-p" ] ; then	# Controllo se l'opzione -p è già stata inserita; in tal caso restituisce errore, altrimenti attiva il flag
+		if ! $poption ; then
+			poption=true
+		else
+			echo "Argomento non valido: opzione -p ripetuta" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+		fi
+	elif [ "$arg" = "-u" ] ; then	# Controllo se l'opzione -u è già stata inserita; in tal caso restituisce errore, altrimenti abilita il check per il controllo utente
+		if ! $uoption ; then
+			checkuser=true
+			continue 1
+		else
+			echo "Argomento non valido: opzione -u ripetuta" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+		fi
+	elif [[ "$arg" = "-"* ]] ; then	# Qualsiasi altra opzione non è accettata
+			echo "Argomento non valido: $arg non è un argomento accettato" 1>&2
+			echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+			exit 1
+	fi
+done
+
+# Controllo se la lista non è vuota e se, una volta inserita l'opzione -u, è stato effettivamente fornito un utente
+if [ "$filelist" = "" ] ; then
+	echo "Errore: la lista file non può essere vuota" 1>&2
+	echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+	exit 1
+fi
+if ! $uoption && $checkuser ; then
+	echo "Errore: devi specificare un utente" 1>&2
+	echo "Uso: bristat [-p] [-m] [-u user] log1 ... logN" 1>&2
+	exit 1
+fi
+
+# Recupero informazioni dai file
+for myfile in $filelist ; do
+	firstline=$(head -1 $myfile)		# La prima riga contiene gli utenti
+	firstuser=${firstline%:*}
+	seconduser=${firstline#*:}
+	if ! $uoption ; then				# Se è stata specificata l'opzione -u ed un utente, non bisogna fare nulla
+		userSetup $firstuser			# Altrimenti inserisco firstuser e seconduser nel dizionario
+		userSetup $seconduser
+	fi
+	winner=$(grep WINS: $myfile)
+	winnerpoints=$(grep POINTS: $myfile)
+	if [ "${winner#*:}" = "$firstuser" ] ; then	# Se il vincitore è il primo utente...
+		if $poption ; then						# ...e se -p è attiva...
+			thisuser=$seconduser				# ...considero il secondo utente (in quanto perde)
+		else									# Se -p non è attiva...
+			thisuser=$firstuser					# ...considero il primo utente (in quanto vincitore)
+		fi
+	else										# Casi analoghi se il vincitore è il secondo utente
+		if $poption ; then
+			thisuser=$firstuser
+		else
+			thisuser=$seconduser
+		fi
+	fi
+	parse=true									
+	if $uoption ; then
+		if [ ! "$myuser" = "$thisuser" ] ; then	# Se -u è specificata e l'utente considerato non è quello inserito dall'utente, non faccio nulla
+			parse=false
+		fi
+	fi
+	if $parse ; then
+		hashVictory $thisuser					# Aumento di una vittoria (sconfitta se -p) l'utente che sto considerando
+	fi
+	actpoints=${winnerpoints#*:}				# Ottengo i punti del vincitore
+	if $poption ; then
+		let "actpoints = 120 - actpoints"		# Se -p è specificata, ottengo i punti del perdente
+	fi
+	if $moption && $parse ; then
+		hashTotalPoints $thisuser $actpoints	# Se -m è specificata, aumento il totale punti delle partite vinte (perse se -p) dell'utente che sto considerando
+	fi				
+done
+
+# Stampa delle statistiche
+if $poption ; then								# Controllo se sto considerando le partite vinte o quelle perse (per fornire l'output corretto)
+	resultstring="perse"
+else
+	resultstring="vinte"
+fi
+	
+if $moption ; then								# Se l'opzione -m è specificata, sostituisco il punteggio totale di ogni utente con la media punti
+	replacePointsWithAverage
+fi
+
+printUsers
